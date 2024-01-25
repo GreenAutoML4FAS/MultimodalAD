@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import numpy
+import numpy as np
 import pandas
 import torch
 import torch.backends.cudnn
@@ -45,6 +46,7 @@ configuration = Configuration(
     dilation3=1,
     milestones=[11, 61],
     gamma=0.1,
+    ratio=1.0
 )
 
 # Make the training reproducible.
@@ -56,10 +58,11 @@ if DETERMINISTIC_CUDA:
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-
 # Disable pylint too-many-variables here for readability.
 # The whole training should run in a single function call.
-def train() -> List[Dict]:  # pylint: disable=too-many-locals
+
+
+def train(configuration) -> List[Dict]:  # pylint: disable=too-many-locals
     """Trains the model with the paper-given parameters.
 
     Returns:
@@ -75,6 +78,7 @@ def train() -> List[Dict]:  # pylint: disable=too-many-locals
         train_gain=configuration.train_gain,
         normalize=configuration.normalize,
         pad=configuration.pad,
+        ratio=configuration.ratio,
     )
 
     # Retrieve the shape of the data for the model initialization.
@@ -110,40 +114,41 @@ def train() -> List[Dict]:  # pylint: disable=too-many-locals
         # Calculate the mean loss over all samples.
         loss = loss / len(train_dl)
 
-        # VALIDATE THE MODEL.
-        model.eval()
-        with torch.no_grad():
-            result_list: List[Dict] = []
-            for _, (tensors, labels) in enumerate(test_dl):
-                tensors = tensors.float().to(DEVICE)
+        if epoch + 1 == configuration.epochs:
+            # VALIDATE THE MODEL.
+            model.eval()
+            with torch.no_grad():
+                result_list: List[Dict] = []
+                for _, (tensors, labels) in enumerate(test_dl):
+                    tensors = tensors.float().to(DEVICE)
 
-                # Calculate forward and jacobian.
-                latent_z, jacobian = model.forward(tensors.transpose(2, 1))
-                jacobian = torch.sum(jacobian, dim=tuple(range(1, jacobian.dim())))
-                # Calculate the anomaly score per sample.
-                loss_per_sample = get_loss_per_sample(latent_z, jacobian)
+                    # Calculate forward and jacobian.
+                    latent_z, jacobian = model.forward(tensors.transpose(2, 1))
+                    jacobian = torch.sum(jacobian, dim=tuple(range(1, jacobian.dim())))
+                    # Calculate the anomaly score per sample.
+                    loss_per_sample = get_loss_per_sample(latent_z, jacobian)
 
-                # Append the anomaly score and the labels to the results list.
-                for j in range(loss_per_sample.shape[0]):
-                    result_labels = {k: v[j].item() if isinstance(v, torch.Tensor) else v[j] for k, v in labels.items()}
-                    result_labels.update(score=loss_per_sample[j].item())
-                    result_list.append(result_labels)
+                    # Append the anomaly score and the labels to the results list.
+                    for j in range(loss_per_sample.shape[0]):
+                        result_labels = {k: v[j].item() if isinstance(v, torch.Tensor) else v[j] for k, v in labels.items()}
+                        result_labels.update(score=loss_per_sample[j].item())
+                        result_list.append(result_labels)
 
-        results = pandas.DataFrame(result_list)
+            results = pandas.DataFrame(result_list)
 
-        # Calculate AUROC per anomaly category.
-        aurocs = []
-        for category in ANOMALY_CATEGORIES:
-            dfn = results[(results["category"] == category.name) | (~results["anomaly"])]
-            fpr, tpr, _ = metrics.roc_curve(dfn["anomaly"], dfn["score"].values, pos_label=True)
-            auroc = metrics.auc(fpr, tpr)
-            aurocs.append(auroc)
+            # Calculate AUROC per anomaly category.
+            aurocs = []
+            for category in ANOMALY_CATEGORIES:
+                dfn = results[(results["category"] == category.name) | (~results["anomaly"])]
+                fpr, tpr, _ = metrics.roc_curve(dfn["anomaly"], dfn["score"].values, pos_label=True)
+                auroc = metrics.auc(fpr, tpr)
+                aurocs.append(auroc)
 
-        # Calculate the AUROC mean over all categories.
-        aurocs_array = numpy.array(aurocs)
-        auroc_mean = aurocs_array.mean()
-        training_results.append({"epoch": epoch, "aurocMean": auroc_mean, "loss": loss})
-        print(f"Epoch {epoch:0>3d}: auroc(mean)={auroc_mean:5.3f}, loss={loss:.6f}")
+            # Calculate the AUROC mean over all categories.
+            aurocs_array = numpy.array(aurocs)
+            auroc_mean = aurocs_array.mean()
+            training_results.append({"epoch": epoch, "aurocMean": auroc_mean, "loss": loss})
+            print(f"Epoch {epoch:0>3d}: auroc(mean)={auroc_mean:5.3f}, loss={loss:.6f}")
 
         scheduler.step()
 
@@ -154,4 +159,22 @@ def train() -> List[Dict]:  # pylint: disable=too-many-locals
 
 
 if __name__ == "__main__":
-    train()
+    print("RATIO:", configuration.ratio)
+    auroc_mean = []
+    training_results = train(configuration)
+    auroc_mean.append(training_results[-1]["aurocMean"])
+    training_results = train(configuration)
+    auroc_mean.append(training_results[-1]["aurocMean"])
+    training_results = train(configuration)
+    auroc_mean.append(training_results[-1]["aurocMean"])
+    training_results = train(configuration)
+    auroc_mean.append(training_results[-1]["aurocMean"])
+    training_results = train(configuration)
+    auroc_mean.append(training_results[-1]["aurocMean"])
+    print(
+        "RATIO:", configuration.ratio,
+        auroc_mean,
+        np.average(auroc_mean), np.std(auroc_mean)
+    )
+
+

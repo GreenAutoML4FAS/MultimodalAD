@@ -59,3 +59,4 @@ Thumbs.db
 
 # Keep the test dataset
 !tests/test.parquet
+/smac3_output/

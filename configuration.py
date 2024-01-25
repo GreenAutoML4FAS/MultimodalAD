@@ -30,3 +30,4 @@ class Configuration(BaseModel):
     milestones: list[int]
     gamma: float
     learning_rate: float = Field(alias="learningRate")
+    ratio: float = Field(alias="ratio")

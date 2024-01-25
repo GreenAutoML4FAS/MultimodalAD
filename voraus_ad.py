@@ -833,6 +833,7 @@ def load_torch_tensors(
     frequency_divider: int,
     train_gain: float,
     pad: bool,
+    ratio: float,
 ) -> Tuple[List[torch.Tensor], List[dict], List[torch.Tensor], List[dict]]:
     """Loads the dataset as torch tensors.
 
@@ -855,8 +856,17 @@ def load_torch_tensors(
         train_gain=train_gain,
         pad=pad,
     )
+
     y_train_arrays = [torch.from_numpy(s).float() for s in x_train]
     x_test_arrays = [torch.from_numpy(s).float() for s in x_test]
+
+    # Sample a random subset of the train data
+    if ratio < 1.0:
+        train_len = len(y_train_arrays)
+        train_k = round(train_len * ratio)
+        train_idx = sample(range(train_len), k=train_k)
+        y_train_arrays = [y_train_arrays[i] for i in train_idx]
+        y_train = [y_train[i] for i in train_idx]
 
     # return shape of each array: (t, signals)
     return y_train_arrays, y_train, x_test_arrays, y_test
@@ -915,6 +925,7 @@ def load_torch_dataloaders(  # pylint: disable=too-many-locals
     frequency_divider: int,
     train_gain: float,
     pad: bool = True,
+    ratio: float = 1.0,
 ) -> tuple[VorausADDataset, VorausADDataset, DataLoader, DataLoader]:
     """Loads the voraus-AD dataset (train and test) as torch data loaders and datasets.
 
@@ -927,6 +938,8 @@ def load_torch_dataloaders(  # pylint: disable=too-many-locals
         frequency_divider: Scale the dataset down by dropping every nth sample.
         train_gain: The factor of train samples to use.
         pad: Whether to use zero padding or not.
+        ratio: The ratio of random sampled train samples to use.
+
 
     Returns:
         The data loaders and datasets.
@@ -938,6 +951,7 @@ def load_torch_dataloaders(  # pylint: disable=too-many-locals
         frequency_divider=frequency_divider,
         train_gain=train_gain,
         pad=pad,
+        ratio=ratio,
     )
 
     train_dataset = VorausADDataset(x_train, y_train, list(columns))
